@@ -1,5 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from llama_parse import LlamaParse
 from typing import Dict, Any
 import json
@@ -15,6 +16,15 @@ nest_asyncio.apply()
 load_dotenv()
 
 app = FastAPI()
+
+# Enable CORS for all origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins; adjust for specific domains in production
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all HTTP methods
+    allow_headers=["*"],  # Allows all headers
+)
 
 # Supported image formats
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
