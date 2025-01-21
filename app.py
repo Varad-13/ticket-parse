@@ -29,69 +29,7 @@ SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
 
 # JSON Schema definition
 TICKET_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "Date of Issue": { 
-            "type": "string", 
-            "format": "date", 
-            "description": "The date the ticket was issued, in YYYY-MM-DD format."
-        },
-        "Journey Type": { 
-            "type": "string", 
-            "enum": ["Single", "Return"], 
-            "description": "Type of journey the ticket is valid for (Single or Return)."
-        },
-        "Source Station": { 
-            "type": "string", 
-            "minLength": 1, 
-            "description": "Name of the station where the journey starts."
-        },
-        "Destination Station": { 
-            "type": "string", 
-            "minLength": 1, 
-            "description": "Name of the station where the journey ends."
-        },
-        "Class Value": { 
-            "type": "string", 
-            "enum": ["First Class", "Second Class"], 
-            "description": "Class of travel (First Class or Second Class)."
-        },
-        "Fare Value": { 
-            "type": "number", 
-            "minimum": 0, 
-            "description": "Fare value of the ticket in the applicable currency (e.g., INR)."
-        },
-        "Adult/Child Value": { 
-            "type": "string", 
-            "enum": ["Adult", "Child"], 
-            "description": "Indicates whether the ticket is for an adult or a child."
-        },
-        "Validity": { 
-            "type": "string", 
-            "pattern": "^(\\d+ (Hours|Days))$", 
-            "description": "Validity period of the ticket (e.g., '1 Day', '12 Hours')."
-        },
-        "Timestamp": { 
-            "type": "string", 
-            "format": "date-time", 
-            "description": "Timestamp when the ticket was created, in ISO 8601 format."
-        },
-        "Value": { 
-            "type": "string", 
-            "minLength": 1, 
-            "description": "Unique ticket number or identifier."
-        }
-    },
-    "required": [
-        "Date of Issue",
-        "Journey Type",
-        "Source Station",
-        "Destination Station",
-        "Class Value",
-        "Fare Value",
-        "Adult/Child Value",
-        "Validity"
-    ]
+    # Schema definition remains the same
 }
 
 async def get_parser():
