@@ -74,6 +74,16 @@ def get_file_extension(filename: str) -> str:
     """Extract the file extension from the filename."""
     return Path(filename).suffix.lower()
 
+@app.get("/status")
+async def server_status() -> Dict[str, str]:
+    """
+    Endpoint to check the server status.
+    
+    Returns:
+        Dict[str, str]: A simple status message.
+    """
+    return {"status": "Server is running"}
+
 @app.post("/parse-ticket")
 async def parse_ticket(file: UploadFile = File(...)) -> Dict[str, Any]:
     """
