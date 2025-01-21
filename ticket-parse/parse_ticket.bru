@@ -1,0 +1,15 @@
+meta {
+  name: parse_ticket
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://localhost:8000/parse-ticket
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  file: @file(C:\Users\varad\Desktop\Meghraj\WhatsApp Image 2025-01-21 at 12.26.15_befe3a01.jpg)
+}
