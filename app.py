@@ -35,8 +35,8 @@ TICKET_SCHEMA = {
     "properties": {
         "Date of Issue": { "type": "string" },
         "Journey Type": { "type": "string" },
-        "Source Station": { "type": "string" },
-        "Destination Station": { "type": "string" },
+        "From Station": { "type": "string" },
+        "To Station": { "type": "string" },
         "Class Value": { "type": "string" },
         "Fare Value": { "type": "number" },
         "Adult/Child Value": { "type": "string" },
@@ -47,8 +47,8 @@ TICKET_SCHEMA = {
     "required": [
         "Date of Issue",
         "Journey Type",
-        "Source Station",
-        "Destination Station",
+        "From Station",
+        "To Station",
         "Class Value",
         "Fare Value",
         "Adult/Child Value",
