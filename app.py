@@ -40,13 +40,6 @@ TICKET_SCHEMA = {
         "Class Value": { "type": "string" },
         "Fare Value": { "type": "number" },
         "Adult/Child Value": { "type": "string" },
-        "Return Details": {
-            "type": "object",
-            "properties": {
-                "Return From": { "type": "string" },
-                "Return To": { "type": "string" }
-            }
-        },
         "Validity": { "type": "string" },
         "Timestamp": { "type": "string" },
         "Value": { "type": "string" }
@@ -57,7 +50,9 @@ TICKET_SCHEMA = {
         "Source Station",
         "Destination Station",
         "Class Value",
-        "Fare Value"
+        "Fare Value",
+        "Adult/Child Value",
+        "Validity"
     ]
 }
 
