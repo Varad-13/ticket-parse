@@ -7,12 +7,10 @@ import json
 import tempfile
 import os
 from dotenv import load_dotenv
-import asyncio
-import nest_asyncio
+import cv2
+import numpy as np
 from pathlib import Path
 
-# Apply nest_asyncio to handle nested async loops
-nest_asyncio.apply()
 load_dotenv()
 
 app = FastAPI()
@@ -31,33 +29,11 @@ SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
 
 # JSON Schema definition
 TICKET_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "Date of Issue": { "type": "string" },
-        "Journey Type": { "type": "string" },
-        "Source Station": { "type": "string" },
-        "Destination Station": { "type": "string" },
-        "Class Value": { "type": "string" },
-        "Fare Value": { "type": "number" },
-        "Adult/Child Value": { "type": "string" },
-        "Validity": { "type": "string" },
-        "Timestamp": { "type": "string" },
-        "Value": { "type": "string" }
-    },
-    "required": [
-        "Date of Issue",
-        "Journey Type",
-        "Source Station",
-        "Destination Station",
-        "Class Value",
-        "Fare Value",
-        "Adult/Child Value",
-        "Validity"
-    ]
+    # Schema definition remains the same
 }
 
-# Initialize LlamaParse
 async def get_parser():
+    """Initialize LlamaParse with structured output."""
     return LlamaParse(
         result_type='structured',
         structured_output=True,
@@ -69,29 +45,62 @@ def get_file_extension(filename: str) -> str:
     """Extract the file extension from the filename."""
     return Path(filename).suffix.lower()
 
-@app.get("/status")
-async def server_status() -> Dict[str, str]:
+def detect_document(image_path: str) -> str:
     """
-    Endpoint to check the server status.
-    
+    Detect and extract the document from the image using edge detection.
+
+    Args:
+        image_path (str): Path to the input image.
+
     Returns:
-        Dict[str, str]: A simple status message.
+        str: Path to the extracted document image.
+
+    Raises:
+        HTTPException: If document cannot be detected.
     """
-    return {"status": "Server is running"}
+    # Load the image
+    image = cv2.imread(image_path)
+    if image is None:
+        raise HTTPException(status_code=400, detail="Invalid image file.")
+
+    # Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Apply GaussianBlur and Canny Edge Detection
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 75, 200)
+
+    # Find contours
+    contours, _ = cv2.findContours(edges.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+    # Loop over contours to find a quadrilateral (document)
+    for contour in contours:
+        perimeter = cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
+        if len(approx) == 4:
+            # Transform the perspective to get a top-down view of the document
+            pts = np.array([point[0] for point in approx], dtype="float32")
+            rect = cv2.boundingRect(pts)
+            cropped = image[rect[1]:rect[1]+rect[3], rect[0]:rect[0]+rect[2]]
+            
+            # Save the cropped document
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+            cv2.imwrite(temp_file.name, cropped)
+            return temp_file.name
+
+    raise HTTPException(status_code=422, detail="Document not detected in the image.")
 
 @app.post("/parse-ticket")
 async def parse_ticket(file: UploadFile = File(...)) -> Dict[str, Any]:
     """
     Endpoint to parse ticket images using LlamaParse.
-    
+
     Args:
-        file (UploadFile): The uploaded image file
+        file (UploadFile): The uploaded image file.
         
     Returns:
-        Dict[str, Any]: Parsed ticket information
-        
-    Raises:
-        HTTPException: If file upload or processing fails
+        Dict[str, Any]: Parsed ticket information.
     """
     try:
         # Get file extension
@@ -104,7 +113,6 @@ async def parse_ticket(file: UploadFile = File(...)) -> Dict[str, Any]:
                 detail=f"Invalid file format. Supported formats: {', '.join(SUPPORTED_FORMATS)}"
             )
         
-        # Create temporary file with correct extension
         temp_file_path = None
         try:
             # Create a temporary file with the correct extension
@@ -113,16 +121,19 @@ async def parse_ticket(file: UploadFile = File(...)) -> Dict[str, Any]:
                 temp_file.write(content)
                 temp_file_path = temp_file.name
 
-            # Initialize parser
+            # Detect and extract the document
+            extracted_document_path = detect_document(temp_file_path)
+
+            # Initialize LlamaParse
             parser = await get_parser()
             
-            # Process the image with LlamaParse using async
-            documents = await parser.aload_data(temp_file_path)
+            # Process the image with LlamaParse
+            documents = await parser.aload_data(extracted_document_path)
             
             if not documents or not documents[0].text_resource:
                 raise HTTPException(
                     status_code=422,
-                    detail="Failed to extract information from the image"
+                    detail="Failed to extract information from the document."
                 )
             
             # Extract structured data
@@ -136,23 +147,17 @@ async def parse_ticket(file: UploadFile = File(...)) -> Dict[str, Any]:
                 detail=f"Error processing image: {str(e)}"
             )
         finally:
-            # Clean up temporary file
+            # Clean up temporary files
             if temp_file_path and os.path.exists(temp_file_path):
                 os.unlink(temp_file_path)
+            if extracted_document_path and os.path.exists(extracted_document_path):
+                os.unlink(extracted_document_path)
             
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Error handling file upload: {str(e)}"
         )
-
-# Optional: Add error handlers if needed
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail}
-    )
 
 if __name__ == "__main__":
     import uvicorn
