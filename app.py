@@ -1,35 +1,57 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Body
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from llama_parse import LlamaParse
-from typing import Dict, Any
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
 import json
 import tempfile
 import os
-from dotenv import load_dotenv
 import asyncio
 import nest_asyncio
 from pathlib import Path
+from dotenv import load_dotenv
 
-# Apply nest_asyncio to handle nested async loops
+# Supabase imports
+from supabase import create_client, Client
+
+# Razorpay import
+import razorpay
+
+# LlamaParse import
+from llama_parse import LlamaParse
+
 nest_asyncio.apply()
 load_dotenv()
 
 app = FastAPI()
 
-# Enable CORS for all origins
+# Enable CORS for all origins (adjust in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins; adjust for specific domains in production
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all HTTP methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
+# ---------------------
+# Supabase Initialization
+# ---------------------
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# ---------------------
+# Razorpay Initialization
+# ---------------------
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
 # Supported image formats
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
 
-# JSON Schema definition
+# JSON Schema definition for parsed tickets
 TICKET_SCHEMA = {
     "type": "object",
     "properties": {
@@ -146,6 +168,78 @@ async def parse_ticket(file: UploadFile = File(...)) -> Dict[str, Any]:
             detail=f"Error handling file upload: {str(e)}"
         )
 
+# ---------------------
+# Ticket Creation Model
+# ---------------------
+class TicketRequest(BaseModel):
+    user_id: str
+    from_station: str
+    to_station: str
+    journey_date: str  # or datetime
+    class_value: str
+    fare_value: float
+    adult_child_value: str
+    validity: str
+    additional_info: Optional[str] = None
+
+@app.post("/create-ticket")
+async def create_ticket(ticket_data: TicketRequest):
+    """
+    Create a ticket record and a Razorpay order.
+    
+    Flow:
+    1. Create Razorpay order with the ticket fare.
+    2. Insert the ticket details + order_id into Supabase.
+    3. Return order_id and amount to the frontend.
+    """
+    try:
+        # 1) Create a Razorpay Order
+        #    Razorpay expects amount in paise for INR
+        amount_in_paise = int(ticket_data.fare_value * 100)
+
+        razorpay_order = razorpay_client.order.create(
+            {
+                "amount": amount_in_paise,
+                "currency": "INR",
+                "receipt": f"receipt_{ticket_data.user_id}",
+                "payment_capture": 1  # auto-capture
+            }
+        )
+
+        order_id = razorpay_order["id"]
+
+        # 2) Insert ticket details into Supabase with the order_id
+        #    You can customize the table name ("tickets") and data as needed.
+        insertion_data = {
+            "user_id": ticket_data.user_id,
+            "from_station": ticket_data.from_station,
+            "to_station": ticket_data.to_station,
+            "journey_date": ticket_data.journey_date,
+            "class_value": ticket_data.class_value,
+            "fare_value": ticket_data.fare_value,
+            "adult_child_value": ticket_data.adult_child_value,
+            "validity": ticket_data.validity,
+            "razorpay_order_id": order_id,
+            "payment_status": "CREATED"  # or any custom status
+        }
+
+        response = supabase.table("tickets").insert(insertion_data).execute()
+        print(response)
+        # 3) Return the Razorpay order details to the frontend
+        return {
+            "order_id": order_id,
+            "amount": ticket_data.fare_value,
+            "currency": "INR",
+            "message": "Ticket created and Razorpay order generated."
+        }
+
+    except Exception as e:
+        print(e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create ticket: {str(e)}"
+        )
+
 # Optional: Add error handlers if needed
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
@@ -154,6 +248,7 @@ async def http_exception_handler(request, exc):
         content={"detail": exc.detail}
     )
 
+# Local development entry point
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
