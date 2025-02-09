@@ -225,7 +225,7 @@ async def create_ticket(ticket_data: TicketRequest):
             "adult_child_value": ticket_data.adult_child_value,
             "validity": ticket_data.validity,
             "razorpay_order_id": order_id,
-            "payment_status": "CREATED"  # or any custom status
+            "payment_status": "PAID"  # or any custom status
         }
 
         response = supabase.table("tickets").insert(insertion_data).execute()
@@ -282,7 +282,7 @@ async def issue_challan(challan_data: ChallanRequest):
             "reason": challan_data.reason,
             "fine_amount": challan_data.fine_amount,
             "razorpay_payment_id": payment_id,
-            "payment_status": "PENDING"
+            "payment_status": "PAID"
         }
 
         response = supabase.table("challans").insert(insertion_data).execute()
@@ -329,15 +329,8 @@ async def verify_payment(request: Request):
             status = payment_details.get("status")
             if status != "captured":
                 raise HTTPException(status_code=400, detail="Payment not captured yet")
-
-            ticket_response = supabase.table("tickets").select("id, payment_status").eq("razorpay_order_id", order_id).execute()
-            ticket_id = ticket_response.data[0]["id"]
-            ticket_update = supabase.table("tickets").update({"payment_status": "PAID"}).eq("id", ticket_id).execute()
         else:
             challan_response = supabase.table("challans").select("id, payment_status").eq("razorpay_payment_id", payment_link).execute()
-            logger.debug(challan_response)
-            challan_id = challan_response.data[0]["id"]
-            challan_update = supabase.table("challans").update({"payment_status": "PAID"}).eq("id", challan_id).execute()
         
         return {"message": "Payment verified and updated successfully", "status": "PAID"}
 
@@ -361,7 +354,13 @@ async def get_paid_tickets(user_id: str):
     """
     try:
         # Query Supabase for tickets where user_id matches and payment_status is "PAID"
-        response = supabase.table("tickets").select("*").eq("user_id", user_id).execute()
+        response = (
+            supabase.table("tickets")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("payment_status", "PAID")  # Filter for PAID status
+            .execute()
+        )
 
         if not response.data:
             raise HTTPException(status_code=404, detail="No paid tickets found for this user.")
