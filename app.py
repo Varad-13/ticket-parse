@@ -10,6 +10,10 @@ import asyncio
 import nest_asyncio
 from pathlib import Path
 from dotenv import load_dotenv
+import logging
+
+logger = logging.getLogger('uvicorn.error')
+logger.setLevel(logging.DEBUG)
 
 # Supabase imports
 from supabase import create_client, Client
@@ -55,6 +59,7 @@ SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
 TICKET_SCHEMA = {
     "type": "object",
     "properties": {
+        "Phone Number": { "type": "number" },
         "Date of Issue": { "type": "string" },
         "Journey Type": { "type": "string" },
         "From Station": { "type": "string" },
@@ -252,3 +257,130 @@ async def http_exception_handler(request, exc):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# ---------------------
+# Challan Model
+# ---------------------
+class ChallanRequest(BaseModel):
+    user_id: str
+    reason: str
+    fine_amount: float
+
+@app.post("/issue-challan")
+async def issue_challan(challan_data: ChallanRequest):
+    """
+    Issue a challan for an invalid ticket and generate a Razorpay payment link.
+    
+    Flow:
+    1. Create a Razorpay payment link for the fine amount.
+    2. Insert challan details into Supabase.
+    3. Return the payment link to the frontend.
+    """
+    try:
+        # 1) Create a Razorpay Payment Link
+        payment_link_response = razorpay_client.payment_link.create({
+            "amount": int(challan_data.fine_amount * 100),  # Amount in paise
+            "currency": "INR",
+            "description": f"Challan for Mumbai Local",
+            "callback_url": "https://ticket-parse-nextjs.vercel.app/success",  # Update with your frontend's success page
+            "callback_method": "get"
+        })
+
+        payment_link = payment_link_response["short_url"]
+        payment_id = payment_link_response["id"]
+
+        # 2) Insert challan details into Supabase
+        insertion_data = {
+            "user_id": challan_data.user_id,
+            "reason": challan_data.reason,
+            "fine_amount": challan_data.fine_amount,
+            "razorpay_payment_id": payment_id,
+            "payment_status": "PENDING"
+        }
+
+        response = supabase.table("challans").insert(insertion_data).execute()
+
+        # 3) Return the Razorpay payment link to the frontend
+        return {
+            "payment_link": payment_link,
+            "amount": challan_data.fine_amount,
+            "currency": "INR",
+            "message": "Challan issued successfully. Use the link to make the payment."
+        }
+
+    except Exception as e:
+        logger.debug(e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to issue challan: {str(e)}"
+        )
+    
+from fastapi import Request
+import re
+
+@app.post("/verify-payment")
+async def verify_payment(request: Request):
+    try:
+        body = await request.json()
+        payment_id = body.get("razorpay_payment_id")
+        payment_link = body.get("razorpay_payment_link_id")
+        order_id = body.get("razorpay_order_id")
+        signature = body.get("razorpay_signature")
+        logger.debug(body)
+
+        if order_id:
+            try:
+                status = razorpay_client.utility.verify_payment_signature({
+                    "razorpay_order_id": order_id,
+                    "razorpay_payment_id": payment_id,
+                    "razorpay_signature": signature
+                })
+
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Signature verification failed: {str(e)}")
+            # Fetch payment status from Razorpay
+            payment_details = razorpay_client.payment.fetch(payment_id)
+            status = payment_details.get("status")
+            if status != "captured":
+                raise HTTPException(status_code=400, detail="Payment not captured yet")
+
+            ticket_response = supabase.table("tickets").select("id, payment_status").eq("razorpay_order_id", order_id).execute()
+            ticket_id = ticket_response.data[0]["id"]
+            ticket_update = supabase.table("tickets").update({"payment_status": "PAID"}).eq("id", ticket_id).execute()
+        else:
+            challan_response = supabase.table("challans").select("id, payment_status").eq("razorpay_payment_id", payment_link).execute()
+            logger.debug(challan_response)
+            challan_id = challan_response.data[0]["id"]
+            challan_update = supabase.table("challans").update({"payment_status": "PAID"}).eq("id", challan_id).execute()
+        
+        return {"message": "Payment verified and updated successfully", "status": "PAID"}
+
+    except Exception as e:
+        logger.exception("Error verifying payment")
+        raise HTTPException(status_code=500, detail=f"Error verifying payment: {str(e)}")
+
+@app.get("/tickets/{user_id}")
+async def get_paid_tickets(user_id: str):
+    """
+    Get all tickets with status "PAID" for a given user_id.
+
+    Args:
+        user_id (str): The ID of the user whose paid tickets need to be fetched.
+
+    Returns:
+        Dict[str, Any]: List of paid tickets for the user.
+    
+    Raises:
+        HTTPException: If no tickets are found or an error occurs.
+    """
+    try:
+        # Query Supabase for tickets where user_id matches and payment_status is "PAID"
+        response = supabase.table("tickets").select("*").eq("user_id", user_id).execute()
+
+        if not response.data:
+            raise HTTPException(status_code=404, detail="No paid tickets found for this user.")
+
+        return {"tickets": response.data}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching tickets: {str(e)}")
