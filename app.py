@@ -245,19 +245,6 @@ async def create_ticket(ticket_data: TicketRequest):
             detail=f"Failed to create ticket: {str(e)}"
         )
 
-# Optional: Add error handlers if needed
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail}
-    )
-
-# Local development entry point
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
 # ---------------------
 # Challan Model
 # ---------------------
@@ -316,7 +303,6 @@ async def issue_challan(challan_data: ChallanRequest):
         )
     
 from fastapi import Request
-import re
 
 @app.post("/verify-payment")
 async def verify_payment(request: Request):
@@ -384,3 +370,17 @@ async def get_paid_tickets(user_id: str):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching tickets: {str(e)}")
+
+
+# Optional: Add error handlers if needed
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail}
+    )
+
+# Local development entry point
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
